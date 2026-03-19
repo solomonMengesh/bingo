@@ -7,6 +7,10 @@ const settingsSchema = new mongoose.Schema(
       default: '@bingosupport',
       trim: true,
     },
+    /** If true, new users get credited with `welcomeBonusAmount` ETB on registration. */
+    welcomeBonusEnabled: { type: Boolean, default: false },
+    /** Amount (ETB) credited to a user when welcome bonus is enabled. */
+    welcomeBonusAmount: { type: Number, default: 0, min: 0 },
     /** Admin login: stored in DB so seed can create first admin from here (optional). Never returned by GET. */
     adminUsername: { type: String, trim: true, default: null },
     adminPasswordHash: { type: String, default: null },

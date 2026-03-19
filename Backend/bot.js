@@ -119,6 +119,35 @@ const mainMenuKeyboard = {
   },
 };
 
+async function getWelcomeBonusSettings() {
+  const res = await axios.get(`${BACKEND_BASE_URL}/api/settings`, { validateStatus: () => true });
+  const data = res?.data || {};
+  return {
+    enabled: data?.welcomeBonusEnabled === true,
+    amount: Number(data?.welcomeBonusAmount) || 0,
+  };
+}
+
+async function ensureRegistered(chatId, telegramId) {
+  if (!telegramId) {
+    await bot.sendMessage(chatId, 'Could not identify your account. Use /start to register first.');
+    return null;
+  }
+
+  const meRes = await axios.get(`${BACKEND_BASE_URL}/api/auth/me`, {
+    params: { telegramId },
+    validateStatus: () => true,
+  });
+
+  const user = meRes?.data?.user;
+  if (!user) {
+    await bot.sendMessage(chatId, 'You are not registered. Use /start to register first.');
+    return null;
+  }
+
+  return user;
+}
+
 /** Build and return the "Available Bingo Games" message text (running + scheduled). */
 async function buildGamesListMessage() {
   let text = '🎮 <b>Available Bingo Games</b>\n\n';
@@ -179,6 +208,11 @@ async function buildGamesListMessage() {
 // /menu — show main menu keyboard
 bot.onText(/^\/menu\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  const telegramId = String(msg.from?.id || '');
+  if (telegramId) {
+    const u = await ensureRegistered(chatId, telegramId);
+    if (!u) return;
+  }
   await bot.sendMessage(chatId, 'Main menu:', mainMenuKeyboard);
 });
 
@@ -186,6 +220,8 @@ bot.onText(/^\/menu\s*$/, async (msg) => {
 bot.onText(/^\/play\s*$/, async (msg) => {
   const chatId = msg.chat.id;
   const telegramId = String(msg.from?.id || '');
+  const u = await ensureRegistered(chatId, telegramId);
+  if (!u) return;
   if (!GAME_WEBAPP_URL || !GAME_WEBAPP_URL.startsWith('https://')) {
     await bot.sendMessage(
       chatId,
@@ -311,7 +347,17 @@ bot.on('contact', async (msg) => {
     // Registration succeeded, clear pending referral
     delete pendingReferrals[telegramId];
 
-    await bot.sendMessage(chatId, '✅ Registration successful!\nWelcome to Bingo Game 🎉', mainMenuKeyboard);
+    let welcomeText = '✅ Registration successful!\nWelcome to Bingo Game 🎉';
+    try {
+      const bonus = await getWelcomeBonusSettings();
+      if (bonus.enabled && bonus.amount > 0) {
+        welcomeText += `\n🎁 Welcome bonus: ${bonus.amount} ETB`;
+      }
+    } catch (e) {
+      // Ignore settings fetch errors; still show registration success.
+    }
+
+    await bot.sendMessage(chatId, welcomeText, mainMenuKeyboard);
   } catch (error) {
     console.error('Error registering user from contact:', error?.response?.data || error.message);
 
@@ -329,6 +375,8 @@ bot.on('contact', async (msg) => {
 bot.onText(/^\/deposit\s*$/, async (msg) => {
   const chatId = msg.chat.id;
   const telegramId = String(msg.from?.id || '');
+  const u = await ensureRegistered(chatId, telegramId);
+  if (!u) return;
   try {
     const res = await axios.get(`${BACKEND_BASE_URL}/api/payment-methods`, {
       params: { enabled: 'true' },
@@ -434,6 +482,11 @@ bot.on('callback_query', async (query) => {
   const telegramId = String(query.from?.id || '');
 
   if (data.startsWith('deposit_pm_')) {
+    const u = await ensureRegistered(chatId, telegramId);
+    if (!u) {
+      await bot.answerCallbackQuery(query.id).catch(() => {});
+      return;
+    }
     const id = data.replace('deposit_pm_', '');
     try {
       await bot.answerCallbackQuery(query.id);
@@ -677,6 +730,8 @@ bot.on('message', async (msg) => {
 
   try {
     if (text === '🔄 Refresh') {
+      const u = await ensureRegistered(chatId, telegramId);
+      if (!u) return;
       try {
         const gamesText = await buildGamesListMessage();
         await bot.sendMessage(chatId, gamesText, { parse_mode: 'HTML', ...mainMenuKeyboard });
@@ -685,6 +740,8 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, 'Could not refresh the game list. Try again in a moment.');
       }
     } else if (text === '🎮 Play Bingo') {
+      const u = await ensureRegistered(chatId, telegramId);
+      if (!u) return;
       if (!GAME_WEBAPP_URL || !GAME_WEBAPP_URL.startsWith('https://')) {
         await bot.sendMessage(
           chatId,
@@ -702,6 +759,8 @@ bot.on('message', async (msg) => {
         });
       }
     } else if (text === '💰 Deposit') {
+      const u = await ensureRegistered(chatId, telegramId);
+      if (!u) return;
       try {
         const res = await axios.get(`${BACKEND_BASE_URL}/api/payment-methods`, {
           params: { enabled: 'true' },
@@ -726,6 +785,8 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, 'Unable to load deposit options. Please try again later.');
       }
     } else if (text === '💸 Withdraw') {
+      const u = await ensureRegistered(chatId, telegramId);
+      if (!u) return;
       try {
         const balanceRes = await axios.get(`${BACKEND_BASE_URL}/api/users/balance/${telegramId}`, {
           validateStatus: (s) => s === 200 || s === 404,
@@ -771,6 +832,8 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, 'Could not identify your account.');
         return;
       }
+      const u = await ensureRegistered(chatId, telegramId);
+      if (!u) return;
       try {
         const res = await axios.get(`${BACKEND_BASE_URL}/api/users/balance/${telegramId}`, {
           validateStatus: (s) => s === 200 || s === 404,
@@ -796,6 +859,8 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(chatId, 'Could not identify your account.');
         return;
       }
+      const u = await ensureRegistered(chatId, telegramId);
+      if (!u) return;
       try {
         const res = await axios.get(`${BACKEND_BASE_URL}/api/bets/history/by-telegram/${telegramId}`, {
           params: { limit: 10 },

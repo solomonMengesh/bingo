@@ -1,7 +1,73 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import api from '../services/api';
+
+const StatCard = ({ label, value, sub }) => (
+  <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
+    <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
+    <p className="text-xl font-semibold mt-1">{value}</p>
+    {sub && <p className="text-[11px] text-slate-500 mt-1">{sub}</p>}
+  </div>
+);
+
+const formatETB = (n) => {
+  const num = Number(n);
+  const safe = Number.isFinite(num) ? num : 0;
+  return `${new Intl.NumberFormat().format(safe)} ETB`;
+};
+
+const formatCompactNumber = (n) => {
+  const num = Number(n);
+  const safe = Number.isFinite(num) ? num : 0;
+  return new Intl.NumberFormat().format(safe);
+};
+
+const formatDateTime = (d) => {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return '—';
+  return dt.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+};
+
+const RevenueBars = ({ points, loading }) => {
+  const safePoints = Array.isArray(points) ? points : [];
+  const max = Math.max(1, ...safePoints.map((p) => Number(p?.revenue) || 0));
+
+  return (
+    <div className="h-48 rounded-xl bg-slate-800/60 border border-dashed border-slate-700 p-3 flex flex-col justify-between">
+      {safePoints.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-xs text-slate-500">
+          {loading ? 'Loading…' : 'No data'}
+        </div>
+      ) : (
+        <div className="flex-1 flex items-end gap-2">
+          {safePoints.map((p) => {
+            const revenue = Number(p?.revenue) || 0;
+            const heightPct = (revenue / max) * 100;
+            const label = String(p?.label ?? '');
+            return (
+              <div key={label} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                <div
+                  className="w-full bg-emerald-500/60 rounded-t"
+                  style={{ height: `${Math.max(3, heightPct)}%` }}
+                  title={`${label}: ${revenue} ETB`}
+                />
+                <span className="text-[9px] text-slate-500 truncate max-w-[44px]" title={label}>
+                  {label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const RevenuePage = () => {
   const [period, setPeriod] = useState('daily'); // 'daily' | 'weekly' | 'monthly'
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [report, setReport] = useState(null);
 
   const periodLabel =
     period === 'daily'
@@ -10,12 +76,35 @@ const RevenuePage = () => {
       ? 'Weekly financial report'
       : 'Monthly financial report';
 
+  useEffect(() => {
+    const fetchReport = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        setReport(null);
+        const res = await api.get('/api/admin/revenue', { params: { period } });
+        setReport(res.data || null);
+      } catch (err) {
+        setError(err.response?.data?.message || err.message || 'Failed to load report');
+        setReport(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReport();
+  }, [period]);
+
+  const totals = report?.totals || {};
+  const deposits = report?.deposits || [];
+  const withdrawals = report?.withdrawals || [];
+  const gameFees = report?.gameFees || [];
+  const agentCommissions = report?.agentCommissions || [];
+  const chartPoints = report?.chart?.points || [];
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-slate-100">
-          {periodLabel}
-        </h2>
+        <h2 className="text-sm font-semibold text-slate-100">{periodLabel}</h2>
         <div className="inline-flex rounded-full bg-slate-900 border border-slate-800 p-1 text-[11px]">
           <button
             type="button"
@@ -55,43 +144,22 @@ const RevenuePage = () => {
 
       {/* High-level metrics */}
       <div className="grid md:grid-cols-4 gap-3">
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">
-            Total revenue
-          </p>
-          <p className="text-xl font-semibold mt-1">120,450 ETB</p>
-        </div>
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">
-            Total payouts
-          </p>
-          <p className="text-xl font-semibold mt-1">102,220 ETB</p>
-        </div>
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">
-            Platform profit
-          </p>
-          <p className="text-xl font-semibold mt-1">18,230 ETB</p>
-        </div>
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">
-            Avg profit / game
-          </p>
-          <p className="text-xl font-semibold mt-1">120 ETB</p>
-        </div>
+        <StatCard label="Total revenue" value={formatETB(totals.totalRevenue)} />
+        <StatCard label="Total payouts" value={formatETB(totals.totalPayouts)} />
+        <StatCard label="Platform profit" value={formatETB(totals.platformProfit)} />
+        <StatCard
+          label="Avg profit / game"
+          value={`${formatCompactNumber(totals.avgProfitPerGame)} ETB`}
+        />
       </div>
 
       {/* Revenue chart */}
       <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-semibold text-slate-200">
-            Revenue chart
-          </span>
-          <span className="text-[10px] text-slate-500">
-            Frontend placeholder
-          </span>
+          <span className="text-xs font-semibold text-slate-200">Revenue chart</span>
+          <span className="text-[10px] text-slate-500">{loading ? 'Loading…' : 'From backend'}</span>
         </div>
-        <div className="h-48 rounded-xl bg-slate-800/60 border border-dashed border-slate-700" />
+        <RevenueBars points={chartPoints} loading={loading} />
       </div>
 
       {/* Detail tables */}
@@ -100,10 +168,10 @@ const RevenuePage = () => {
         <div className="space-y-3">
           <div className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
-              <span className="text-xs font-semibold text-slate-200">
-                Deposits
+              <span className="text-xs font-semibold text-slate-200">Deposits</span>
+              <span className="text-[10px] text-slate-500">
+                {loading ? 'Loading…' : `${deposits.length} rows`}
               </span>
-              <span className="text-[10px] text-slate-500">Sample rows</span>
             </div>
             <table className="min-w-full text-[11px]">
               <thead className="bg-slate-900/80 text-slate-400">
@@ -114,34 +182,34 @@ const RevenuePage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                <tr>
-                  <td className="px-3 py-1.5">@normalogi</td>
-                  <td className="px-3 py-1.5 text-right font-semibold">
-                    200 ETB
-                  </td>
-                  <td className="px-3 py-1.5 text-slate-400">
-                    2026-03-12 10:23
-                  </td>
-                </tr>
-                <tr>
-                  <td className="px-3 py-1.5">@player2</td>
-                  <td className="px-3 py-1.5 text-right font-semibold">
-                    100 ETB
-                  </td>
-                  <td className="px-3 py-1.5 text-slate-400">
-                    2026-03-11 18:05
-                  </td>
-                </tr>
+                {deposits.slice(0, 8).map((d) => (
+                  <tr key={d._id}>
+                    <td className="px-3 py-1.5">
+                      {d.user?.username ? `@${d.user.username}` : d.user?.telegramId || '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-semibold">
+                      {Number(d.amount) || 0} ETB
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-400">{formatDateTime(d.time)}</td>
+                  </tr>
+                ))}
+                {!loading && deposits.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-center text-slate-500" colSpan={3}>
+                      No deposits for this period.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
-              <span className="text-xs font-semibold text-slate-200">
-                Withdrawals
+              <span className="text-xs font-semibold text-slate-200">Withdrawals</span>
+              <span className="text-[10px] text-slate-500">
+                {loading ? 'Loading…' : `${withdrawals.length} rows`}
               </span>
-              <span className="text-[10px] text-slate-500">Sample rows</span>
             </div>
             <table className="min-w-full text-[11px]">
               <thead className="bg-slate-900/80 text-slate-400">
@@ -152,15 +220,24 @@ const RevenuePage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                <tr>
-                  <td className="px-3 py-1.5">@normalogi</td>
-                  <td className="px-3 py-1.5 text-right font-semibold">
-                    300 ETB
-                  </td>
-                  <td className="px-3 py-1.5 text-slate-400">
-                    2026-03-12 11:05
-                  </td>
-                </tr>
+                {withdrawals.slice(0, 8).map((w) => (
+                  <tr key={w._id}>
+                    <td className="px-3 py-1.5">
+                      {w.user?.username ? `@${w.user.username}` : w.user?.telegramId || '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-semibold">
+                      {Number(w.amount) || 0} ETB
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-400">{formatDateTime(w.time)}</td>
+                  </tr>
+                ))}
+                {!loading && withdrawals.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-center text-slate-500" colSpan={3}>
+                      No withdrawals for this period.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -170,12 +247,8 @@ const RevenuePage = () => {
         <div className="space-y-3">
           <div className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
-              <span className="text-xs font-semibold text-slate-200">
-                Game fees
-              </span>
-              <span className="text-[10px] text-slate-500">
-                Platform share per game
-              </span>
+              <span className="text-xs font-semibold text-slate-200">Game fees</span>
+              <span className="text-[10px] text-slate-500">Platform share per game</span>
             </div>
             <table className="min-w-full text-[11px]">
               <thead className="bg-slate-900/80 text-slate-400">
@@ -186,30 +259,35 @@ const RevenuePage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                <tr>
-                  <td className="px-3 py-1.5">#57</td>
-                  <td className="px-3 py-1.5 text-right">20 ETB</td>
-                  <td className="px-3 py-1.5 text-right font-semibold">
-                    120 ETB
-                  </td>
-                </tr>
-                <tr>
-                  <td className="px-3 py-1.5">#56</td>
-                  <td className="px-3 py-1.5 text-right">10 ETB</td>
-                  <td className="px-3 py-1.5 text-right font-semibold">
-                    80 ETB
-                  </td>
-                </tr>
+                {gameFees.slice(0, 8).map((g) => {
+                  const gameId = g.gameId ? String(g.gameId).slice(-6) : '';
+                  return (
+                    <tr key={String(g.gameId || gameId || 'unknown')}>
+                      <td className="px-3 py-1.5">#{gameId || '—'}</td>
+                      <td className="px-3 py-1.5 text-right">{formatCompactNumber(g.stake)} ETB</td>
+                      <td className="px-3 py-1.5 text-right font-semibold">
+                        {formatCompactNumber(g.platformFee)} ETB
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!loading && gameFees.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-center text-slate-500" colSpan={3}>
+                      No game fees for this period.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
-              <span className="text-xs font-semibold text-slate-200">
-                Agent commissions
+              <span className="text-xs font-semibold text-slate-200">Agent commissions</span>
+              <span className="text-[10px] text-slate-500">
+                {loading ? 'Loading…' : `${agentCommissions.length} rows`}
               </span>
-              <span className="text-[10px] text-slate-500">Sample rows</span>
             </div>
             <table className="min-w-full text-[11px]">
               <thead className="bg-slate-900/80 text-slate-400">
@@ -220,18 +298,33 @@ const RevenuePage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                <tr>
-                  <td className="px-3 py-1.5">@agent1</td>
-                  <td className="px-3 py-1.5 text-right font-semibold">
-                    450 ETB
-                  </td>
-                  <td className="px-3 py-1.5 text-slate-400">Mar 2026</td>
-                </tr>
+                {agentCommissions.slice(0, 8).map((a) => (
+                  <tr key={a.agent}>
+                    <td className="px-3 py-1.5">{a.agent}</td>
+                    <td className="px-3 py-1.5 text-right font-semibold">
+                      {formatCompactNumber(a.commission)} ETB
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-400">{a.period}</td>
+                  </tr>
+                ))}
+                {!loading && agentCommissions.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-center text-slate-500" colSpan={3}>
+                      No agent commissions for this period.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-xl bg-rose-900/30 border border-rose-700/50 px-4 py-3 text-xs text-rose-200">
+          {error}
+        </div>
+      )}
     </div>
   );
 };

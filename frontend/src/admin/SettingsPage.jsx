@@ -12,6 +12,10 @@ const SettingsPage = () => {
   const [seedResult, setSeedResult] = useState(null);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+  const [welcomeBonusEnabled, setWelcomeBonusEnabled] = useState(false);
+  const [welcomeBonusAmount, setWelcomeBonusAmount] = useState('');
+  const [welcomeBonusSaving, setWelcomeBonusSaving] = useState(false);
+  const [welcomeBonusSaved, setWelcomeBonusSaved] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -21,6 +25,12 @@ const SettingsPage = () => {
         setSupportContact(data.supportContact ?? '@esubingosupport1');
         setAdminUsername(data.adminUsername ?? '');
         setMaintenanceMode(Boolean(data.maintenanceMode));
+        setWelcomeBonusEnabled(data.welcomeBonusEnabled === true);
+        setWelcomeBonusAmount(
+          data.welcomeBonusAmount != null && Number.isFinite(Number(data.welcomeBonusAmount))
+            ? String(data.welcomeBonusAmount)
+            : ''
+        );
       } catch (e) {
         console.warn('Failed to load settings', e);
         setSupportContact('@esubingosupport1');
@@ -81,6 +91,32 @@ const SettingsPage = () => {
       console.error('Failed to save support contact', e);
     } finally {
       setSupportContactSaving(false);
+    }
+  };
+
+  const saveWelcomeBonus = async () => {
+    setWelcomeBonusSaving(true);
+    setWelcomeBonusSaved(false);
+    try {
+      const amt = welcomeBonusAmount.toString().trim();
+      const parsed = amt ? Number(amt) : 0;
+      if (welcomeBonusEnabled && (!Number.isFinite(parsed) || parsed < 0)) {
+        alert('Welcome bonus amount must be a valid number (>= 0).');
+        return;
+      }
+
+      await api.patch('/api/settings', {
+        welcomeBonusEnabled,
+        welcomeBonusAmount: parsed,
+      });
+
+      setWelcomeBonusSaved(true);
+      setTimeout(() => setWelcomeBonusSaved(false), 2500);
+    } catch (e) {
+      console.error('Failed to save welcome bonus', e);
+      alert(e.response?.data?.message || 'Failed to save welcome bonus.');
+    } finally {
+      setWelcomeBonusSaving(false);
     }
   };
 
@@ -201,6 +237,65 @@ const SettingsPage = () => {
           {supportContactSaved && (
             <span className="text-[11px] text-emerald-400">Saved</span>
           )}
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-3">
+        <h3 className="text-xs font-semibold text-slate-200">Welcome bonus</h3>
+        <p className="text-[11px] text-slate-400">
+          Credits new users with a starting balance when they register.
+        </p>
+
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setWelcomeBonusEnabled(!welcomeBonusEnabled)}
+              disabled={welcomeBonusSaving}
+              className={`relative inline-flex h-8 w-14 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 ${
+                welcomeBonusEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+              }`}
+              role="switch"
+              aria-checked={welcomeBonusEnabled}
+            >
+              <span
+                className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow ring-0 transition ${
+                  welcomeBonusEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+            <span className="text-sm font-medium text-slate-200">
+              {welcomeBonusEnabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="space-y-1 flex-1 min-w-[220px]">
+            <span className="text-slate-400 text-xs">Bonus amount (ETB)</span>
+            <input
+              type="number"
+              min={0}
+              step="1"
+              value={welcomeBonusAmount}
+              onChange={(e) => setWelcomeBonusAmount(e.target.value)}
+              disabled={!welcomeBonusEnabled || welcomeBonusSaving}
+              className="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-60"
+              placeholder="e.g. 50"
+            />
+          </label>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={saveWelcomeBonus}
+              disabled={welcomeBonusSaving}
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 transition-colors"
+            >
+              {welcomeBonusSaving ? 'Saving…' : 'Save'}
+            </button>
+            {welcomeBonusSaved && <span className="text-xs text-emerald-400">Saved</span>}
+          </div>
         </div>
       </div>
 

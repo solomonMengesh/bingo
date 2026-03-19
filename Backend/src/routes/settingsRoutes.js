@@ -21,7 +21,14 @@ router.get('/', async (req, res) => {
 // PATCH /api/settings — update settings (admin). Can set adminUsername + adminPassword to store in DB.
 router.patch('/', async (req, res) => {
   try {
-    const { supportContact, adminUsername, adminPassword, maintenanceMode } = req.body || {};
+    const {
+      supportContact,
+      adminUsername,
+      adminPassword,
+      maintenanceMode,
+      welcomeBonusEnabled,
+      welcomeBonusAmount,
+    } = req.body || {};
     let doc = await Settings.findOne();
     if (!doc) doc = await Settings.create({});
     if (typeof supportContact === 'string') {
@@ -35,6 +42,16 @@ router.patch('/', async (req, res) => {
     }
     if (typeof maintenanceMode === 'boolean') {
       doc.maintenanceMode = maintenanceMode;
+    }
+
+    if (typeof welcomeBonusEnabled === 'boolean') {
+      doc.welcomeBonusEnabled = welcomeBonusEnabled;
+    }
+    if (welcomeBonusAmount != null) {
+      const amt = Number(welcomeBonusAmount);
+      if (Number.isFinite(amt) && amt >= 0) {
+        doc.welcomeBonusAmount = amt;
+      }
     }
     await doc.save();
     const out = doc.toObject ? doc.toObject() : doc;

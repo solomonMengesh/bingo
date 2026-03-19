@@ -1,5 +1,7 @@
 const express = require('express');
 const User = require('../models/User');
+const Settings = require('../models/Settings');
+const getSettings = Settings.getSettings;
 
 const router = express.Router();
 
@@ -61,6 +63,16 @@ router.post('/register', async (req, res) => {
       // optional referredBy if joined with agent referral link
       referredBy,
     });
+
+    // Optional welcome bonus for new registrations.
+    // Credits balance immediately; no additional ledger records are created.
+    const settings = await getSettings();
+    const bonusEnabled = settings?.welcomeBonusEnabled === true;
+    const bonusAmount = Number(settings?.welcomeBonusAmount) || 0;
+    if (bonusEnabled && bonusAmount > 0) {
+      await User.findByIdAndUpdate(user._id, { $inc: { balance: bonusAmount } });
+      user.balance = bonusAmount; // reflects credited amount on top of default 0
+    }
 
     return res.status(201).json({
       message: 'User registered successfully',
