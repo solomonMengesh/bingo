@@ -1,0 +1,3 @@
+/* App-level styles are handled by Tailwind now. This file is kept
+   so CRA imports still succeed, but is intentionally minimal. */
+

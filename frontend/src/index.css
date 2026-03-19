@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply m-0 bg-gradient-to-b from-bingoDark via-slate-900 to-black text-slate-100 font-sans;
+}
+
+#root {
+  @apply min-h-screen;
+}
+
+/* Smooth ease-in-out animation for the current call chip */
+.current-call-animate {
+  animation: current-call-ease 0.35s ease-in-out;
+}
+
+@keyframes current-call-ease {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
