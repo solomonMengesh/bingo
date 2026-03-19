@@ -148,6 +148,33 @@ async function ensureRegistered(chatId, telegramId) {
   return user;
 }
 
+const MAINTENANCE_MESSAGE = 'Service is temporarily under maintenance. Please try again later.';
+let maintenanceCache = { value: null, untilMs: 0 };
+
+async function isMaintenanceOn() {
+  if (maintenanceCache.untilMs > Date.now() && typeof maintenanceCache.value === 'boolean') {
+    return maintenanceCache.value;
+  }
+  try {
+    const res = await axios.get(`${BACKEND_BASE_URL}/api/settings`, { validateStatus: () => true });
+    const data = res?.data || {};
+    const on = data?.maintenanceMode === true;
+    maintenanceCache = { value: on, untilMs: Date.now() + 15000 };
+    return on;
+  } catch {
+    // If settings fetch fails, do not block the bot.
+    maintenanceCache = { value: false, untilMs: Date.now() + 5000 };
+    return false;
+  }
+}
+
+async function ensureNotMaintenance(chatId) {
+  const on = await isMaintenanceOn();
+  if (!on) return true;
+  await bot.sendMessage(chatId, MAINTENANCE_MESSAGE);
+  return false;
+}
+
 /** Build and return the "Available Bingo Games" message text (running + scheduled). */
 async function buildGamesListMessage() {
   let text = '🎮 <b>Available Bingo Games</b>\n\n';
@@ -208,6 +235,7 @@ async function buildGamesListMessage() {
 // /menu — show main menu keyboard
 bot.onText(/^\/menu\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from?.id || '');
   if (telegramId) {
     const u = await ensureRegistered(chatId, telegramId);
@@ -219,6 +247,7 @@ bot.onText(/^\/menu\s*$/, async (msg) => {
 // /play — same as \"🎮 Play Bingo\" button
 bot.onText(/^\/play\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from?.id || '');
   const u = await ensureRegistered(chatId, telegramId);
   if (!u) return;
@@ -243,6 +272,7 @@ bot.onText(/^\/play\s*$/, async (msg) => {
 // /history — show last 10 bets (same as Bet History button)
 bot.onText(/^\/history\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from?.id || '');
   if (!telegramId) {
     await bot.sendMessage(chatId, 'Could not identify your account.');
@@ -284,6 +314,7 @@ bot.onText(/^\/history\s*$/, async (msg) => {
 // Handle /start and /start AGENT_ID
 bot.onText(/^\/start(?:\s+(.+))?/, async (msg, match) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from.id);
   const agentIdFromCommand = match && match[1] ? match[1].trim() : '';
 
@@ -324,6 +355,7 @@ bot.on('contact', async (msg) => {
   if (!msg.contact) {
     return;
   }
+  if (!(await ensureNotMaintenance(chatId))) return;
 
   const contact = msg.contact;
   const phoneNumber = contact.phone_number;
@@ -374,6 +406,7 @@ bot.on('contact', async (msg) => {
 // /deposit command — same as Deposit button
 bot.onText(/^\/deposit\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from?.id || '');
   const u = await ensureRegistered(chatId, telegramId);
   if (!u) return;
@@ -402,6 +435,7 @@ bot.onText(/^\/deposit\s*$/, async (msg) => {
 // /withdraw — same as \"💸 Withdraw\" button
 bot.onText(/^\/withdraw\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from?.id || '');
   try {
     const balanceRes = await axios.get(`${BACKEND_BASE_URL}/api/users/balance/${telegramId}`, {
@@ -448,6 +482,7 @@ bot.onText(/^\/withdraw\s*$/, async (msg) => {
 // /balance — same as \"📊 Balance\" button
 bot.onText(/^\/balance\s*$/, async (msg) => {
   const chatId = msg.chat.id;
+  if (!(await ensureNotMaintenance(chatId))) return;
   const telegramId = String(msg.from?.id || '');
   if (!telegramId) {
     await bot.sendMessage(chatId, 'Could not identify your account.');
@@ -480,6 +515,7 @@ bot.on('callback_query', async (query) => {
   const chatId = query.message?.chat?.id;
   const data = query.data || '';
   const telegramId = String(query.from?.id || '');
+  if (!(await ensureNotMaintenance(chatId))) return;
 
   if (data.startsWith('deposit_pm_')) {
     const u = await ensureRegistered(chatId, telegramId);
@@ -591,6 +627,7 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
   const telegramId = String(msg.from?.id || '');
+  if (!(await ensureNotMaintenance(chatId))) return;
   const isMainMenuText =
     text === '🎮 Play Bingo' ||
     text === '🔄 Refresh' ||
