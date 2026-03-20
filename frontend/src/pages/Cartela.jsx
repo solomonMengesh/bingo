@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import CartelaNumberGrid from '../components/CartelaNumberGrid';
 import BingoBoard from '../components/BingoBoard';
@@ -167,12 +167,38 @@ const Cartela = () => {
     return () => clearInterval(t);
   }, [notEnoughPlayers?.countdown]);
 
-  useEffect(() => {
+  const initRoom = useCallback(() => {
     if (!roomId) return;
-    if (!socket.connected) socket.connect();
     socket.emit('join_room', { roomId });
     socket.emit('watch_cartelas', { roomId });
   }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId) return undefined;
+
+    if (!socket.connected) {
+      socket.connect();
+    } else {
+      initRoom();
+    }
+
+    const onConnect = () => {
+      initRoom();
+      refetch();
+    };
+    const onReconnect = () => {
+      initRoom();
+      refetch();
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('reconnect', onReconnect);
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('reconnect', onReconnect);
+    };
+  }, [roomId, socket.connected, initRoom, refetch]);
 
   useEffect(() => {
     // Lock until we have authoritative cartela state.
@@ -184,6 +210,7 @@ const Cartela = () => {
   useEffect(() => {
     if (!roomId) return undefined;
     const handleState = (payload) => {
+      if (payload?.gameId != null && String(payload.gameId) !== String(roomId)) return;
       if (payload?.taken) setTakenCartelas(Array.isArray(payload.taken) ? payload.taken : []);
       setCartelaStateLoaded(true);
     };
