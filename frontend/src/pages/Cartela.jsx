@@ -43,7 +43,7 @@ const Cartela = () => {
   const { user } = useAuth();
   const telegramId = user?.id ?? null;
   const { roomId: locRoomId, entryFee: locEntryFee } = location.state || {};
-  const { state, refetch } = useGameState(telegramId, locRoomId || undefined);
+  const { state, loading: gameStateLoading, refetch } = useGameState(telegramId, locRoomId || undefined);
   const {
     roomId: stateGameId,
     entryFee: stateStake,
@@ -64,6 +64,16 @@ const Cartela = () => {
 
   const usePool = Array.isArray(cartelaPool) && cartelaPool.length > 0;
   const poolSize = usePool ? cartelaPool.length : 200;
+
+  /** True when REST game state has enough cartela-selection data to unlock the grid (primary unlock path). */
+  const hasRestCartelaData = useMemo(() => {
+    if (gameStateLoading || !state || !roomId) return false;
+    if (String(state.gameId) !== String(roomId)) return false;
+    if (state.roundStatus !== 'cartela_selection') return false;
+    const pool = Array.isArray(state.cartelaPool) && state.cartelaPool.length > 0;
+    if (pool) return Array.isArray(state.selectedForRound);
+    return true;
+  }, [gameStateLoading, state, roomId]);
   const maxCartelasPerPlayer = 4;
 
   const [selectedCartelas, setSelectedCartelas] = useState(() => {
@@ -144,11 +154,18 @@ const Cartela = () => {
   }, [usePool, stateCartelaId, stateCartela, stateCartelaIds, previewCartelaId]);
 
   useEffect(() => {
-    if (usePool && Array.isArray(selectedForRound)) {
-      setTakenCartelas(selectedForRound.map((s) => s.cartelaId).filter((id) => id != null));
-      setCartelaStateLoaded(true);
+    // Lock until REST or socket provides authoritative cartela state for this room (runs before REST unlock below).
+    setCartelaStateLoaded(false);
+  }, [roomId, usePool]);
+
+  useEffect(() => {
+    if (!hasRestCartelaData || !state) return;
+    const pool = Array.isArray(state.cartelaPool) && state.cartelaPool.length > 0;
+    if (pool && Array.isArray(state.selectedForRound)) {
+      setTakenCartelas(state.selectedForRound.map((s) => s.cartelaId).filter((id) => id != null));
     }
-  }, [usePool, selectedForRound]);
+    setCartelaStateLoaded(true);
+  }, [hasRestCartelaData, state]);
 
   useEffect(() => {
     const r = state?.countdownRemaining;
@@ -184,7 +201,6 @@ const Cartela = () => {
 
     const onConnect = () => {
       initRoom();
-      refetch();
     };
     const onReconnect = () => {
       initRoom();
@@ -201,11 +217,13 @@ const Cartela = () => {
   }, [roomId, socket.connected, initRoom, refetch]);
 
   useEffect(() => {
-    // Lock until we have authoritative cartela state.
-    // - In pool mode, `selectedForRound` comes from backend state immediately.
-    // - In legacy mode, we rely on socket `cartela_state` event.
-    setCartelaStateLoaded(false);
-  }, [roomId, usePool]);
+    if (!roomId || cartelaStateLoaded) return undefined;
+    const t = setTimeout(() => {
+      if (!socket.connected) socket.connect();
+      socket.emit('watch_cartelas', { roomId });
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [roomId, cartelaStateLoaded]);
 
   useEffect(() => {
     if (!roomId) return undefined;
