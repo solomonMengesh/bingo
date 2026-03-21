@@ -12,6 +12,12 @@ import api from './services/api';
 import MaintenancePage from './components/MaintenancePage';
 import Lobby from './pages/Lobby';
 import Cartela from './pages/Cartela';
+
+/** Remount Cartela on each visit so local selection/taken state cannot go stale vs the server. */
+function CartelaRoute() {
+  const location = useLocation();
+  return <Cartela key={location.key} />;
+}
 import Game from './pages/Game';
 import Wallet from './pages/Wallet';
 import Win from './pages/Win';
@@ -87,7 +93,7 @@ const AppShell = () => {
         <Routes>
           <Route path="/" element={<Navigate to="/lobby" replace />} />
           <Route path="/lobby" element={<Lobby />} />
-          <Route path="/cartela" element={<Cartela />} />
+          <Route path="/cartela" element={<CartelaRoute />} />
           <Route path="/game" element={<Game />} />
           <Route path="/win" element={<Win />} />
           <Route path="/wallet" element={<Wallet />} />

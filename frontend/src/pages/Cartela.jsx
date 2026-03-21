@@ -95,6 +95,31 @@ const Cartela = () => {
   const inFlightRef = useRef(new Set());
   const [cartelaStateLoaded, setCartelaStateLoaded] = useState(false);
 
+  const roomIdRef = useRef(roomId);
+  const refetchRef = useRef(refetch);
+  const navigateRef = useRef(navigate);
+  const selectedCartelasRef = useRef(selectedCartelas);
+  const stateCartelaIdsRef = useRef(stateCartelaIds);
+  const usePoolRef = useRef(usePool);
+  const stateCartelaRef = useRef(stateCartela);
+  const stateCartelaIdRef = useRef(stateCartelaId);
+  const entryFeeRef = useRef(entryFee);
+
+  roomIdRef.current = roomId;
+  refetchRef.current = refetch;
+  navigateRef.current = navigate;
+  selectedCartelasRef.current = selectedCartelas;
+  stateCartelaIdsRef.current = stateCartelaIds;
+  usePoolRef.current = usePool;
+  stateCartelaRef.current = stateCartela;
+  stateCartelaIdRef.current = stateCartelaId;
+  entryFeeRef.current = entryFee;
+
+  useEffect(() => {
+    hasNavigatedRef.current = false;
+    inFlightRef.current.clear();
+  }, [roomId]);
+
   // Prize stats are updated via Socket.IO (`prizes_updated`) during cartela selection.
   const [prizeStats, setPrizeStats] = useState(() => ({
     numberOfPlayers: state?.numberOfPlayers ?? 0,
@@ -154,11 +179,6 @@ const Cartela = () => {
   }, [usePool, stateCartelaId, stateCartela, stateCartelaIds, previewCartelaId]);
 
   useEffect(() => {
-    // Lock until REST or socket provides authoritative cartela state for this room (runs before REST unlock below).
-    setCartelaStateLoaded(false);
-  }, [roomId, usePool]);
-
-  useEffect(() => {
     if (!hasRestCartelaData || !state) return;
     const pool = Array.isArray(state.cartelaPool) && state.cartelaPool.length > 0;
     if (pool && Array.isArray(state.selectedForRound)) {
@@ -166,6 +186,35 @@ const Cartela = () => {
     }
     setCartelaStateLoaded(true);
   }, [hasRestCartelaData, state]);
+
+  // Always fetch current game state on mount and on every navigation to Cartela (location.key),
+  // and again when `roomId` resolves from navigation state or from the first API response.
+  useEffect(() => {
+    if (roomId) refetch(roomId);
+    else refetch();
+  }, [location.key, roomId, refetch]);
+
+  useEffect(() => {
+    if (!roomId || roundStatus !== 'cartela_selection') return undefined;
+    const t = setInterval(() => {
+      refetch(roomId);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [roomId, roundStatus, refetch]);
+
+  useEffect(() => {
+    if (!roomId) return undefined;
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      refetch(roomId);
+      if (socket.connected) {
+        socket.emit('join_room', { roomId });
+        socket.emit('watch_cartelas', { roomId });
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [roomId, refetch]);
 
   useEffect(() => {
     const r = state?.countdownRemaining;
@@ -193,6 +242,9 @@ const Cartela = () => {
   useEffect(() => {
     if (!roomId) return undefined;
 
+    setCartelaStateLoaded(false);
+    setTakenCartelas([]);
+
     if (!socket.connected) {
       socket.connect();
     } else {
@@ -201,16 +253,18 @@ const Cartela = () => {
 
     const onConnect = () => {
       initRoom();
+      refetch(roomId);
     };
     const onReconnect = () => {
       initRoom();
-      refetch();
+      refetch(roomId);
     };
 
     socket.on('connect', onConnect);
     socket.on('reconnect', onReconnect);
 
     return () => {
+      socket.emit('leave_room', { roomId });
       socket.off('connect', onConnect);
       socket.off('reconnect', onReconnect);
     };
@@ -227,21 +281,33 @@ const Cartela = () => {
 
   useEffect(() => {
     if (!roomId) return undefined;
+
+    const matchesRoom = (payload) => {
+      const gid = payload?.gameId ?? payload?.roomId;
+      if (gid == null) return false;
+      return String(gid) === String(roomIdRef.current);
+    };
+
     const handleState = (payload) => {
-      if (payload?.gameId != null && String(payload.gameId) !== String(roomId)) return;
-      if (payload?.taken) setTakenCartelas(Array.isArray(payload.taken) ? payload.taken : []);
+      if (payload?.gameId != null && String(payload.gameId) !== String(roomIdRef.current)) return;
+      if (Array.isArray(payload?.taken)) setTakenCartelas(payload.taken);
       setCartelaStateLoaded(true);
     };
+
     const handleTaken = (payload) => {
-      const id = payload?.cartelaId != null ? payload.cartelaId : payload?.cartelaNumber;
-      if (typeof id === 'number') {
-        inFlightRef.current.delete(id);
-        setTakenCartelas((prev) => (prev.includes(id) ? prev : [...prev, id]));
-      }
+      if (!matchesRoom(payload)) return;
+      const raw = payload?.cartelaId != null ? payload.cartelaId : payload?.cartelaNumber;
+      const id = typeof raw === 'number' ? raw : Number(raw);
+      if (!Number.isFinite(id)) return;
+      inFlightRef.current.delete(id);
+      setTakenCartelas((prev) => (prev.includes(id) ? prev : [...prev, id]));
     };
+
     const handleDeselected = (payload) => {
-      const id = payload?.cartelaId;
-      if (typeof id !== 'number') return;
+      if (payload?.gameId != null && String(payload.gameId) !== String(roomIdRef.current)) return;
+      const raw = payload?.cartelaId;
+      const id = typeof raw === 'number' ? raw : Number(raw);
+      if (!Number.isFinite(id)) return;
       inFlightRef.current.delete(id);
       setTakenCartelas((prev) => prev.filter((n) => n !== id));
       setSelectedCartelas((prev) => {
@@ -250,29 +316,40 @@ const Cartela = () => {
         return next;
       });
     };
+
     const handleCountdown = (payload) => {
-      if (payload?.gameId === roomId && typeof payload.remainingSeconds === 'number') {
-        setTimeLeft(payload.remainingSeconds);
-        setNotEnoughPlayers((prev) => (prev ? null : prev));
-      }
+      if (String(payload?.gameId) !== String(roomIdRef.current) || typeof payload.remainingSeconds !== 'number') return;
+      setTimeLeft(payload.remainingSeconds);
+      setNotEnoughPlayers((prev) => (prev ? null : prev));
     };
+
     const handleRoundPlaying = (payload) => {
-      if (payload?.gameId !== roomId || hasNavigatedRef.current) return;
+      if (String(payload?.gameId) !== String(roomIdRef.current) || hasNavigatedRef.current) return;
       hasNavigatedRef.current = true;
-      refetch();
-      const ids = selectedCartelas.length ? selectedCartelas : (stateCartelaIds ?? []);
-      navigate('/game', {
-        state: { roomId, entryFee, cartelaNumber: usePool ? undefined : (ids[0] ?? stateCartela), cartelaId: usePool ? (ids[0] ?? stateCartelaId) : undefined, cartelaIds: usePool ? ids : undefined },
+      const r = roomIdRef.current;
+      refetchRef.current(r);
+      const ids = selectedCartelasRef.current.length ? selectedCartelasRef.current : (stateCartelaIdsRef.current ?? []);
+      const up = usePoolRef.current;
+      navigateRef.current('/game', {
+        state: {
+          roomId: r,
+          entryFee: entryFeeRef.current,
+          cartelaNumber: up ? undefined : (ids[0] ?? stateCartelaRef.current),
+          cartelaId: up ? (ids[0] ?? stateCartelaIdRef.current) : undefined,
+          cartelaIds: up ? ids : undefined,
+        },
         replace: true,
       });
     };
+
     const handleRoundSkippedNoPlayers = (payload) => {
-      if (payload?.gameId !== roomId || hasNavigatedRef.current) return;
+      if (String(payload?.gameId) !== String(roomIdRef.current) || hasNavigatedRef.current) return;
       hasNavigatedRef.current = true;
-      navigate('/win', {
+      const r = roomIdRef.current;
+      navigateRef.current('/win', {
         state: {
-          roomId,
-          entryFee,
+          roomId: r,
+          entryFee: entryFeeRef.current,
           noPlayers: true,
           messageAmharic: payload.messageAmharic || 'በዚህ ዙር ምንም ተጫዋች አልተቀላቀለም። አዲስ ዙር በቅርቡ ይጀምራል።',
           messageEnglish: payload.messageEnglish || 'No players joined this round. A new round will start shortly.',
@@ -280,13 +357,15 @@ const Cartela = () => {
         replace: true,
       });
     };
+
     const handleNotEnoughPlayers = (payload) => {
-      if (payload?.gameId !== roomId || hasNavigatedRef.current) return;
+      if (String(payload?.gameId) !== String(roomIdRef.current) || hasNavigatedRef.current) return;
       hasNavigatedRef.current = true;
-      navigate('/win', {
+      const r = roomIdRef.current;
+      navigateRef.current('/win', {
         state: {
-          roomId,
-          entryFee,
+          roomId: r,
+          entryFee: entryFeeRef.current,
           noPlayers: true,
           messageAmharic: payload.messageAmharic || 'በዚህ ዙር ምንም በቂ ተጫዋች አልተቀላቀለም። አዲስ ዙር በቅርቡ ይጀምራል።',
           messageEnglish: payload.messageEnglish || 'Not enough players joined this round. A new round will start shortly.',
@@ -294,8 +373,9 @@ const Cartela = () => {
         replace: true,
       });
     };
+
     const handlePrizesUpdated = (payload) => {
-      if (payload?.gameId !== roomId) return;
+      if (String(payload?.gameId) !== String(roomIdRef.current)) return;
       setPrizeStats((prev) => ({
         ...prev,
         numberOfPlayers: payload.numberOfPlayers ?? prev.numberOfPlayers,
@@ -303,6 +383,28 @@ const Cartela = () => {
         prizePool: payload.prizePool ?? prev.prizePool,
       }));
     };
+
+    const handleRoundReset = (payload) => {
+      if (String(payload?.gameId) !== String(roomIdRef.current)) return;
+      setTakenCartelas([]);
+      inFlightRef.current.clear();
+      setCartelaStateLoaded(false);
+    };
+
+    const handleRoundStarted = (payload) => {
+      if (String(payload?.gameId) !== String(roomIdRef.current)) return;
+      if (typeof payload.countdownSeconds === 'number') setTimeLeft(payload.countdownSeconds);
+      const r = roomIdRef.current;
+      refetchRef.current(r);
+      if (socket.connected) {
+        socket.emit('join_room', { roomId: r });
+        socket.emit('watch_cartelas', { roomId: r });
+      }
+      setSelectedCartelas([]);
+      setPreviewCartelaId(null);
+      setCartelaStateLoaded(false);
+    };
+
     socket.on('cartela_state', handleState);
     socket.on('cartela_selected', handleTaken);
     socket.on('cartela_reserved', handleTaken);
@@ -312,6 +414,9 @@ const Cartela = () => {
     socket.on('round_skipped_no_players', handleRoundSkippedNoPlayers);
     socket.on('round_skipped_not_enough_players', handleNotEnoughPlayers);
     socket.on('prizes_updated', handlePrizesUpdated);
+    socket.on('round_reset', handleRoundReset);
+    socket.on('round_started', handleRoundStarted);
+
     return () => {
       socket.off('cartela_state', handleState);
       socket.off('cartela_selected', handleTaken);
@@ -322,8 +427,10 @@ const Cartela = () => {
       socket.off('round_skipped_no_players', handleRoundSkippedNoPlayers);
       socket.off('round_skipped_not_enough_players', handleNotEnoughPlayers);
       socket.off('prizes_updated', handlePrizesUpdated);
+      socket.off('round_reset', handleRoundReset);
+      socket.off('round_started', handleRoundStarted);
     };
-  }, [roomId, refetch, navigate, selectedCartelas, previewCartelaId, stateCartela, stateCartelaId, usePool]);
+  }, [roomId]);
 
   if (state && roundStatus === 'playing') {
     const ids = selectedCartelas.length ? selectedCartelas : (stateCartelaIds ?? (stateCartelaId != null ? [stateCartelaId] : []));
@@ -454,7 +561,7 @@ const Cartela = () => {
         </button>
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={() => roomId && refetch(roomId)}
           className="flex items-center gap-2 rounded-xl bg-slate-700/90 hover:bg-slate-600 border border-slate-600 px-3 py-2 text-sm font-medium text-slate-200 active:scale-[0.98] transition"
         >
           <span aria-hidden>🔄</span> Refresh

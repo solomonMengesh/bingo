@@ -5,15 +5,16 @@ export function useGameState(telegramId, gameId = null) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const refetch = useCallback(async () => {
-    if (!telegramId && !gameId) {
+  const refetch = useCallback(async (gameIdOverride) => {
+    const gid = gameIdOverride ?? gameId;
+    if (!telegramId && !gid) {
       setState(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const params = { telegramId: telegramId || undefined, gameId: gameId || undefined };
+      const params = { telegramId: telegramId || undefined, gameId: gid || undefined };
       const res = await api.get('/api/game/state', { params });
       setState(res.data?.state ?? res.data?.game ?? null);
     } catch (err) {
@@ -24,6 +25,7 @@ export function useGameState(telegramId, gameId = null) {
     }
   }, [telegramId, gameId]);
 
+  // Initial load: always hit the backend when this hook mounts or identity/game filter changes.
   useEffect(() => {
     refetch();
   }, [refetch]);
