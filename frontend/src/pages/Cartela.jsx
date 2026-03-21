@@ -65,15 +65,15 @@ const Cartela = () => {
   const usePool = Array.isArray(cartelaPool) && cartelaPool.length > 0;
   const poolSize = usePool ? cartelaPool.length : 200;
 
-  /** True when REST game state has enough cartela-selection data to unlock the grid (primary unlock path). */
-  const hasRestCartelaData = useMemo(() => {
-    if (gameStateLoading || !state || !roomId) return false;
+  /** Server says we are in cartela selection for this room (ignore `loading` so refetches do not re-lock the grid). */
+  const hasAuthoritativeCartelaView = useMemo(() => {
+    if (!state || !roomId) return false;
     if (String(state.gameId) !== String(roomId)) return false;
     if (state.roundStatus !== 'cartela_selection') return false;
     const pool = Array.isArray(state.cartelaPool) && state.cartelaPool.length > 0;
     if (pool) return Array.isArray(state.selectedForRound);
     return true;
-  }, [gameStateLoading, state, roomId]);
+  }, [state, roomId]);
   const maxCartelasPerPlayer = 4;
 
   const [selectedCartelas, setSelectedCartelas] = useState(() => {
@@ -179,13 +179,13 @@ const Cartela = () => {
   }, [usePool, stateCartelaId, stateCartela, stateCartelaIds, previewCartelaId]);
 
   useEffect(() => {
-    if (!hasRestCartelaData || !state) return;
+    if (!hasAuthoritativeCartelaView || !state) return;
     const pool = Array.isArray(state.cartelaPool) && state.cartelaPool.length > 0;
     if (pool && Array.isArray(state.selectedForRound)) {
       setTakenCartelas(state.selectedForRound.map((s) => s.cartelaId).filter((id) => id != null));
     }
     setCartelaStateLoaded(true);
-  }, [hasRestCartelaData, state]);
+  }, [hasAuthoritativeCartelaView, state]);
 
   // Always fetch current game state on mount and on every navigation to Cartela (location.key),
   // and again when `roomId` resolves from navigation state or from the first API response.
@@ -268,7 +268,9 @@ const Cartela = () => {
       socket.off('connect', onConnect);
       socket.off('reconnect', onReconnect);
     };
-  }, [roomId, socket.connected, initRoom, refetch]);
+    // Do not depend on `socket.connected`: when it flips true this effect would re-run,
+    // reset cartelaStateLoaded/taken, and leave the grid stuck disabled (production issue).
+  }, [roomId, initRoom, refetch]);
 
   useEffect(() => {
     if (!roomId || cartelaStateLoaded) return undefined;
@@ -457,7 +459,7 @@ const Cartela = () => {
     return null;
   }
 
-  const uiLocked = !cartelaStateLoaded;
+  const uiLocked = !cartelaStateLoaded && !hasAuthoritativeCartelaView;
 
   const handleSelectCartela = (num) => {
     setSelectError(null);
